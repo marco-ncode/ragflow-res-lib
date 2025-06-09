@@ -146,8 +146,9 @@ RUN git clone --branch NOVA-AI https://github.com/marco-ncode/ragflow-res-lib.gi
     cd /ragflow-source && \
     git checkout NOVA-AI
 
-# Copy all source files from the cloned repository
-COPY --from=/ragflow-source /ragflow-source/pyproject.toml /ragflow-source/uv.lock ./
+# Copy all files from the cloned repository to working directory
+RUN cp -r /ragflow-source/* /ragflow/ && \
+    cp -r /ragflow-source/.git /ragflow/
 
 # Install dependencies from uv.lock file
 RUN --mount=type=cache,id=ragflow_uv,target=/root/.cache/uv,sharing=locked \
@@ -162,16 +163,9 @@ RUN --mount=type=cache,id=ragflow_uv,target=/root/.cache/uv,sharing=locked \
         uv sync --python 3.10 --frozen --all-extras; \
     fi
 
-# Copy web and docs from your fork
-COPY --from=/ragflow-source /ragflow-source/web web
-COPY --from=/ragflow-source /ragflow-source/docs docs
-
 # Build the frontend with your modifications
 RUN --mount=type=cache,id=ragflow_npm,target=/root/.npm,sharing=locked \
     cd web && npm install && npm run build
-
-# Copy git info for version
-COPY --from=/ragflow-source /ragflow-source/.git /ragflow/.git
 
 RUN version_info=$(git describe --tags --match=v* --first-parent --always); \
     if [ "$LIGHTEN" == "1" ]; then \
@@ -181,6 +175,9 @@ RUN version_info=$(git describe --tags --match=v* --first-parent --always); \
     fi; \
     echo "RAGFlow version: $version_info"; \
     echo $version_info > /ragflow/VERSION
+
+# Clean up source directory
+RUN rm -rf /ragflow-source
 
 # production stage
 FROM base AS production
@@ -195,36 +192,25 @@ ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 
 ENV PYTHONPATH=/ragflow/
 
-# Clone your fork again for production files
-RUN git clone --branch NOVA-AI https://github.com/marco-ncode/ragflow-res-lib.git /ragflow-source && \
-    cd /ragflow-source && \
-    git checkout NOVA-AI
-
-# Copy all application code from your fork
-COPY --from=/ragflow-source /ragflow-source/web web
-COPY --from=/ragflow-source /ragflow-source/api api
-COPY --from=/ragflow-source /ragflow-source/conf conf
-COPY --from=/ragflow-source /ragflow-source/deepdoc deepdoc
-COPY --from=/ragflow-source /ragflow-source/rag rag
-COPY --from=/ragflow-source /ragflow-source/agent agent
-COPY --from=/ragflow-source /ragflow-source/graphrag graphrag
-COPY --from=/ragflow-source /ragflow-source/agentic_reasoning agentic_reasoning
-COPY --from=/ragflow-source /ragflow-source/pyproject.toml /ragflow-source/uv.lock ./
-COPY --from=/ragflow-source /ragflow-source/mcp mcp
-COPY --from=/ragflow-source /ragflow-source/plugin plugin
+# Copy all application files from builder (which includes your fork's code)
+COPY --from=builder /ragflow/web /ragflow/web
+COPY --from=builder /ragflow/api /ragflow/api
+COPY --from=builder /ragflow/conf /ragflow/conf
+COPY --from=builder /ragflow/deepdoc /ragflow/deepdoc
+COPY --from=builder /ragflow/rag /ragflow/rag
+COPY --from=builder /ragflow/agent /ragflow/agent
+COPY --from=builder /ragflow/graphrag /ragflow/graphrag
+COPY --from=builder /ragflow/agentic_reasoning /ragflow/agentic_reasoning
+COPY --from=builder /ragflow/pyproject.toml /ragflow/uv.lock /ragflow/
+COPY --from=builder /ragflow/mcp /ragflow/mcp
+COPY --from=builder /ragflow/plugin /ragflow/plugin
 
 # Copy docker specific files
-COPY --from=/ragflow-source /ragflow-source/docker/service_conf.yaml.template ./conf/service_conf.yaml.template
-COPY --from=/ragflow-source /ragflow-source/docker/entrypoint.sh ./
-RUN chmod +x ./entrypoint*.sh
-
-# Copy compiled web pages (with your frontend modifications)
-COPY --from=builder /ragflow/web/dist /ragflow/web/dist
+COPY --from=builder /ragflow/docker/service_conf.yaml.template /ragflow/conf/service_conf.yaml.template
+COPY --from=builder /ragflow/docker/entrypoint.sh /ragflow/
+RUN chmod +x /ragflow/entrypoint*.sh
 
 # Copy version info
 COPY --from=builder /ragflow/VERSION /ragflow/VERSION
-
-# Clean up
-RUN rm -rf /ragflow-source
 
 ENTRYPOINT ["./entrypoint.sh"]
